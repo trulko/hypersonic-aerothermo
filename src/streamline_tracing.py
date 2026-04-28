@@ -174,6 +174,7 @@ class TRACE:
         ax.set_ylabel('y')
         ax.set_zlabel('z')
         ax.legend(loc='best')
+        ax.set_aspect('equal')
 
         if save_path:
             fig.savefig(save_path, dpi=150, bbox_inches='tight')
