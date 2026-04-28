@@ -204,95 +204,76 @@ def panelization_volume(lower_mesh, upper_mesh):
 
     return _proj_vol(lower_mesh) - _proj_vol(upper_mesh)
 
-
-def plot_panelization(lower_mesh, upper_mesh,
-                      alpha=0.6, save_path=None, show=True):
-    """3-D matplotlib plot of the lower and upper surface meshes.
-
-    Parameters
-    ----------
-    lower_mesh, upper_mesh : dicts from ``panelize_geometry``
-    alpha      : face transparency (0–1)
-    save_path  : file path to save figure; ``None`` skips saving
-    show       : call ``plt.show()`` if True
-    """
-    fig = plt.figure(figsize=(10, 7))
-    ax  = fig.add_subplot(111, projection="3d")
-
-    def _add_mesh(mesh, facecolor, edgecolor, label):
-        verts = [tri for tri in mesh["triangles"]]   # list of (3,3)
-        poly  = Poly3DCollection(verts, alpha=alpha,
-                                 facecolor=facecolor,
-                                 edgecolor=edgecolor,
-                                 linewidth=0.2)
-        ax.add_collection3d(poly)
-        # Invisible scatter for legend proxy
-        c = mesh["centroids"]
-        ax.scatter([], [], [], color=facecolor, label=label, s=20)
-
-    _add_mesh(lower_mesh, facecolor="steelblue",  edgecolor="navy",   label="Lower surface")
-    _add_mesh(upper_mesh, facecolor="coral",      edgecolor="firebrick", label="Upper surface")
-
-    # Axis limits from all vertices
-    all_verts = np.vstack([lower_mesh["triangles"].reshape(-1, 3),
-                           upper_mesh["triangles"].reshape(-1, 3)])
-    for i, lbl in enumerate(("x", "y", "z")):
-        lo, hi = all_verts[:, i].min(), all_verts[:, i].max()
-        pad = 0.05 * (hi - lo) if (hi - lo) > 0 else 1.0
-        getattr(ax, f"set_{lbl}lim")(lo - pad, hi + pad)
-
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_zlabel("z")
-    ax.set_title("Waverider surface mesh")
-    ax.legend(loc="best")
-    ax.set_box_aspect([1, 1, 1])
-    ax.set_aspect('equal')
-
-    if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
-    if show:
-        plt.show()
-    plt.close(fig)
-
-
-def plot_scalar_field(mesh, values,
+def plot_scalar_field(lower_mesh, lower_field,
+                      upper_mesh=None, upper_field=None,
                       title="Scalar field on mesh",
                       cmap="viridis",
                       colorbar_label="Value",
                       vmin=None, vmax=None,
+                      lower_alpha=None, upper_alpha=None,
                       save_path=None, show=True):
     """Plot a scalar field over a triangular surface mesh.
 
     Parameters
     ----------
-    mesh          : dict from ``panelize_geometry``
-    values        : ndarray (N_tri,) scalar value per triangle
+    lower_mesh    : dict from ``panelize_geometry``
+    lower_field   : ndarray (N_tri,) scalar value per triangle on lower surface
+    upper_mesh    : dict from ``panelize_geometry`` (optional)
+    upper_field   : ndarray (N_tri,) scalar value per triangle on upper surface (optional)
     title         : plot title
     cmap          : matplotlib colormap name
     colorbar_label: label for the colorbar
     vmin, vmax    : optional color limits
+    lower_alpha   : transparency for lower mesh (0–1); if None, uses 1.0 unless
+                    an upper mesh is provided, then defaults to 0.8
+    upper_alpha   : transparency for upper mesh (0–1); if None, defaults to 0.8
     save_path     : file path to save figure; ``None`` skips saving
     show          : call ``plt.show()`` if True
     """
-    values = np.asarray(values, dtype=float)
-    if values.shape[0] != mesh["triangles"].shape[0]:
-        raise ValueError("values must match number of triangles")
+    lower_field = np.asarray(lower_field, dtype=float)
+    if lower_field.shape[0] != lower_mesh["triangles"].shape[0]:
+        raise ValueError("lower_field must match number of triangles")
+    
+    if upper_mesh is not None and upper_field is not None:
+        upper_field = np.asarray(upper_field, dtype=float)
+        if upper_field.shape[0] != upper_mesh["triangles"].shape[0]:
+            raise ValueError("upper_field must match number of triangles")
+
+    if lower_alpha is None:
+        lower_alpha = 0.8 if (upper_mesh is not None and upper_field is not None) else 1.0
+    if upper_alpha is None:
+        upper_alpha = 0.8
+
+    if not (0.0 <= lower_alpha <= 1.0):
+        raise ValueError("lower_alpha must be between 0 and 1")
+    if not (0.0 <= upper_alpha <= 1.0):
+        raise ValueError("upper_alpha must be between 0 and 1")
 
     fig = plt.figure(figsize=(10, 7))
     ax = fig.add_subplot(111, projection="3d")
 
     norm = colors.Normalize(vmin=vmin, vmax=vmax)
     cmap_obj = cm.get_cmap(cmap)
-    facecolors = cmap_obj(norm(values))
 
-    verts = [tri for tri in mesh["triangles"]]
-    poly = Poly3DCollection(verts, facecolors=facecolors,
+    facecolors_lower = cmap_obj(norm(lower_field))
+    facecolors_lower[:, 3] = lower_alpha
+    verts = [tri for tri in lower_mesh["triangles"]]
+    poly = Poly3DCollection(verts, facecolors=facecolors_lower,
                             edgecolor="k", linewidth=0.1)
     ax.add_collection3d(poly)
 
+    if upper_mesh is not None and upper_field is not None:
+        facecolors_upper = cmap_obj(norm(upper_field))
+        facecolors_upper[:, 3] = upper_alpha
+        verts = [tri for tri in upper_mesh["triangles"]]
+        poly = Poly3DCollection(verts, facecolors=facecolors_upper,
+                                edgecolor="k", linewidth=0.1)
+        ax.add_collection3d(poly)
+
     # Axis limits from mesh vertices
-    all_verts = mesh["triangles"].reshape(-1, 3)
+    all_verts = lower_mesh["triangles"].reshape(-1, 3)
+    if upper_mesh is not None:
+        all_verts = np.vstack([all_verts, upper_mesh["triangles"].reshape(-1, 3)])
     for i, lbl in enumerate(("x", "y", "z")):
         lo, hi = all_verts[:, i].min(), all_verts[:, i].max()
         pad = 0.05 * (hi - lo) if (hi - lo) > 0 else 1.0
@@ -306,7 +287,7 @@ def plot_scalar_field(mesh, values,
     ax.set_aspect("equal")
 
     mappable = cm.ScalarMappable(norm=norm, cmap=cmap_obj)
-    mappable.set_array(values)
+    mappable.set_array(lower_field)
     cbar = fig.colorbar(mappable, ax=ax, shrink=0.75, pad=0.05)
     cbar.set_label(colorbar_label)
 
