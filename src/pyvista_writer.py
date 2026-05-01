@@ -6,6 +6,7 @@ Public API
 plot_scalar_field_pv(...)
 plot_flowfield_slices_pv(...)
 plot_geometry_views_pv(...)
+plot_geometry_grid_pv(...)
 """
 
 import numpy as np
@@ -485,4 +486,74 @@ def plot_geometry_views_pv(lower_mesh, upper_mesh,
         plotter.add_title('Top', font='arial', color='k', font_size=14)
 
         if save_path: plotter.screenshot(save_path)
+        plotter.close()
+
+
+# ---------------------------------------------------------------------------
+# Geometry grid (side + front per geometry)
+# ---------------------------------------------------------------------------
+def plot_geometry_grid_pv(meshes, labels=None,
+                          wire_color="black",
+                          background="white",
+                          window_size=(1400, 900),
+                          edge_line_width=1.0,
+                          zoom=2,
+                          label_color="black",
+                          label_font_size=12,
+                          save_path=None):
+    """Render a grid of wireframe geometries with side and front views.
+
+    Parameters
+    ----------
+    meshes : list of (lower_mesh, upper_mesh)
+        Mesh pairs to render, one row per geometry.
+    labels : list of str or None
+        Optional per-row labels shown on the side view.
+    """
+    import pyvista as pv
+
+    if not meshes:
+        raise ValueError("meshes must contain at least one geometry")
+    if labels is None:
+        labels = [""] * len(meshes)
+    if len(labels) != len(meshes):
+        raise ValueError("labels must match meshes length")
+
+    def _add_body(plotter, lower_mesh, upper_mesh):
+        pd_lo = _mesh_to_polydata(lower_mesh)
+        pd_up = _mesh_to_polydata(upper_mesh)
+        plotter.add_mesh(pd_lo, color=wire_color, style="wireframe",
+                         line_width=edge_line_width)
+        plotter.add_mesh(pd_up, color=wire_color, style="wireframe",
+                         line_width=edge_line_width)
+
+    n_rows = len(meshes)
+    with pv.vtk_verbosity('off'):
+        plotter = pv.Plotter(off_screen=True, shape=(n_rows, 2),
+                             window_size=window_size,col_weights=[0.6, 0.4])
+        plotter.set_background(background)
+        plotter.enable_hidden_line_removal(all_renderers=True)
+
+        for i, (lower_mesh, upper_mesh) in enumerate(meshes):
+            # Side view (x-z plane)
+            plotter.subplot(i, 0)
+            _add_body(plotter, lower_mesh, upper_mesh)
+            plotter.view_xz(negative=True)
+            plotter.reset_camera()
+            plotter.camera.zoom(zoom)
+            label = labels[i]
+            if label:
+                plotter.add_text(label, position="upper_left",
+                                 font_size=label_font_size,
+                                 color=label_color)
+
+            # Front view (y-z plane)
+            plotter.subplot(i, 1)
+            _add_body(plotter, lower_mesh, upper_mesh)
+            plotter.view_yz(negative=True)
+            plotter.reset_camera()
+            plotter.camera.zoom(zoom)
+
+        if save_path:
+            plotter.screenshot(save_path)
         plotter.close()
