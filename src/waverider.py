@@ -67,7 +67,8 @@ class Waverider:
                  M1: float,
                  gamma: float,
                  beta: float,
-                 L: float = 2.0,
+                 min_volume: float,
+                 min_height: float,
                  N: int = 500,
                  N_l: int = 50,
                  R1_frac: float = 0.2,
@@ -76,7 +77,6 @@ class Waverider:
         self.M1      = M1
         self.gamma   = gamma
         self.beta    = beta
-        self.L       = L
         self.N       = N
         self.N_l     = N_l
         self.N_up    = N_l
@@ -84,7 +84,8 @@ class Waverider:
         self.W2_frac = W2_frac
         self.n_shape = n_shape
 
-        self.geometry = self._build_geometry()
+        self.L        = self._get_minimum_length(min_volume, min_height)
+        self.geometry = self._build_geometry(self.L)
         self.panel    = Panelization(self.geometry)
 
         # aerothermo results are filled by aerothermodynamics(); set defaults.
@@ -100,11 +101,29 @@ class Waverider:
         self.CL_total = self.CD_total = self.LD_total = None
 
     # -----------------------------------------------------------
-    def _build_geometry(self) -> dict:
+    def _get_minimum_length(self, target_volume, target_height) -> float:
+        """
+        Determines the required length L to meet minimum volume and height constraints.
+        """
+        # 1. Instantiate a "Unit" Waverider (L = 1.0)
+        unit_geometry = self._build_geometry(1.0)
+        unit_panel = Panelization(unit_geometry)
+        unit_volume = unit_panel.volume
+        unit_height = unit_panel.height
+        
+        # 2. Apply Scaling Laws
+        L_req_vol = (target_volume / unit_volume) ** (1.0 / 3.0)
+        L_req_height = (target_height / unit_height)
+        L_final = max(L_req_vol, L_req_height)
+        
+        return L_final
+
+    # -----------------------------------------------------------
+    def _build_geometry(self, L : float) -> dict:
         # Build backface geometry
         self.teg = TEG(self.gamma)
         z_func, Rs = self.teg.make_simple_backface(
-            L=self.L, beta_deg=self.beta,
+            L=L, beta_deg=self.beta,
             R1_frac=self.R1_frac, W_frac=self.W2_frac,
             n_shape=self.n_shape,
         )
@@ -126,11 +145,11 @@ class Waverider:
         # Streamline tracing
         self.tracer = TRACE(self.gamma)
         geometry = self.tracer.tracing_module(
-            z_func, Rs, self.L, self.N, self.N_l, self.N_up, Vr_i, V_theta_i)
+            z_func, Rs, L, self.N, self.N_l, self.N_up, Vr_i, V_theta_i)
 
         # Cache projection used by plot_geometry
         _, _, _, X_p, Y_p, Z_p, *_ = self.tracer.projection_module(
-            z_func, Rs, self.L, self.N)
+            z_func, Rs, L, self.N)
         self._X_p, self._Y_p, self._Z_p = X_p, Y_p, Z_p
 
         geometry["shock_conditions"] = {
@@ -144,10 +163,17 @@ class Waverider:
         }
         geometry["parameters"] = {
             "M1": self.M1, "gamma": self.gamma, "beta": self.beta,
-            "L": self.L, "N": self.N, "N_l": self.N_l, "N_up": self.N_up,
+            "L": L, "N": self.N, "N_l": self.N_l, "N_up": self.N_up,
             "Rs": Rs,
         }
         return geometry
+
+    # -----------------------------------------------------------
+    def inviscid_aerodynamics(self) -> float:
+        """Compute inviscid aerodynamic forces and return inviscid L/D."""
+        self.pressure        = compute_pressure(self.geometry, self.panel.lower_mesh)
+        self.inviscid_forces = compute_inviscid_forces(self.geometry, self.panel.lower_mesh)
+        return self.inviscid_forces["L_over_D"]
 
     # -----------------------------------------------------------
     def aerothermodynamics(self,
@@ -187,8 +213,7 @@ class Waverider:
         upper_mesh = self.panel.upper_mesh
 
         # Compute inviscid aerodynamic contributions
-        self.pressure        = compute_pressure(self.geometry, lower_mesh)
-        self.inviscid_forces = compute_inviscid_forces(self.geometry, lower_mesh)
+        self.inviscid_aerodynamics()
 
         # Compute viscous skin-friction contributions
         self.viscous_forces = compute_skin_friction(
