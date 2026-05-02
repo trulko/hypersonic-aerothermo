@@ -88,6 +88,7 @@ class Waverider:
         self.L        = self._get_minimum_length(min_volume, min_area, min_height)
         self.geometry = self._build_geometry(self.L)
         self.panel    = Panelization(self.geometry)
+        self.vehicle_length = self.tracer.vehicle_length(self.geometry)
 
         # aerothermo results are filled by aerothermodynamics(); set defaults.
         self.T_inf = self.p_inf = self.T_allow = None
@@ -254,13 +255,21 @@ class Waverider:
         print(f"  M2            = {sc['M2']:.4f}")
         print(f"  theta         = {sc['theta_deg']:.4f} deg")
         print(f"  cone angle    = {sc['cone_half_angle_deg']:.4f} deg")
+        print(f"  cone length   = {self.L:.3f} m")
+
+        print(f"\nTrailing edge:")
+        print(f"  R1_frac       = {self.R1_frac:.3f}")
+        print(f"  W2_frac       = {self.W2_frac:.3f}")
+        print(f"  n_shape       = {self.n_shape:.3f}")
+        print(f"  beta          = {self.beta:.3f} deg")
 
         print(f"\nGeometry Statistics")
-        print(f"  Triangles     = {self.panel.n_triangles}  "
-              f"({self.panel.n_lower} lower, {self.panel.n_upper} upper)")
-        print(f"  Wetted area   = {self.panel.wetted_area:.3f} m^2")
+        print(f"  Length          = {self.vehicle_length:.3f} m")
+        print(f"  Height          = {self.panel.height:.3f} m")
+        print(f"  Wetted area     = {self.panel.wetted_area:.3f} m^2")
         print(f"  Volume (approx) = {self.panel.volume:.3f} m^3")
-        print(f"  Height  = {self.panel.height:.3f} m")
+        print(f"  Triangles       = {self.panel.n_triangles}  "
+              f"({self.panel.n_lower} lower, {self.panel.n_upper} upper)")
 
         if self.inviscid_forces is None:
             print("\n(aerothermodynamics(...) has not been run yet)")
@@ -340,7 +349,6 @@ class Waverider:
             cmap="viridis",
             colorbar_label="Cp",
             upper_alpha=0.3,
-            vmin=0.089,
             save_path=os.path.join(output_dir, "pressure_cp.png"),
         )
 
@@ -376,14 +384,14 @@ class Waverider:
         # Flowfield Mach contours on cutting planes
         plot_flowfield_slices_pv(
             self.geometry, lower_mesh, upper_mesh,
-            field="mach", cmap="Blues",
+            field="mach", cmap="Blues", vehicle_length=self.vehicle_length,
             save_path=os.path.join(output_dir, "flowfield_mach.png"),
         )
 
         # Flowfield Temperature contours on cutting planes
         plot_flowfield_slices_pv(
             self.geometry, lower_mesh, upper_mesh,
-            field="temperature", cmap="Reds",
+            field="temperature", cmap="Reds", vehicle_length=self.vehicle_length,
             save_path=os.path.join(output_dir, "flowfield_temperature.png"),
         )
         print(f"All plots saved to {output_dir}")

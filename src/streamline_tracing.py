@@ -11,6 +11,15 @@ class TRACE:
         self.tm_i = Taylor_Maccoll(gamma)
         self.TEG = TEG(gamma)
 
+    def vehicle_length(self, geometry) -> float:
+        """Return the vehicle length along +x from geometry coordinates."""
+        xs = []
+        for us in geometry.get("upper_surface", []):
+            if "x" in us:
+                xs.append(np.asarray(us["x"], dtype=float))
+        x_all = np.concatenate(xs)
+        return float(x_all.max() - x_all.min())
+
     def projection_module(self, z_func, Rs, L, N):
         y_plot, z_plot, x_plot_break, y_plot_break, z_plot_break = \
             self.TEG.te_curve(z_func, Rs, L, N)
@@ -35,14 +44,12 @@ class TRACE:
         r_i_s_full = np.sqrt(x_plot_break**2 + z_plot_break**2 + y_plot_break**2)
         theta_i_s_full = np.arctan(np.sqrt(z_plot_break**2 + y_plot_break**2) / x_plot_break)
 
-        # Build evenly-spaced indices along the break curve
-        idx = [0]
-        for i in range(1, N_l + 1):
-            j = len(r_i_s_full) % N_l
-            if j == 0:
-                idx.append(int(i * (len(r_i_s_full) / N_l) - 1))
-            else:
-                idx.append(int(i * ((len(r_i_s_full) - j) / N_l) - 1))
+        # Streamlines run from the symmetry plane (idx=0) to just inboard of
+        # the wing tip (idx=M-2). The exact tip (M-1) is skipped because there
+        # the LE and TE coincide and the streamline collapses to a point; the
+        # remaining sliver is closed by a tip cap in mesh_panelization.
+        M = len(r_i_s_full)
+        idx = np.linspace(0, M - 2, N_l).round().astype(int).tolist()
 
         for temp in range(N_l):
             phi = -np.arctan(y_plot_break[idx[temp]] / z_plot_break[idx[temp]])
@@ -58,7 +65,17 @@ class TRACE:
             r_march = [r_i_s_full[idx[temp]]]
             thet_march = [thet_array[0]]
 
-            for i in range(1, len(thet_array)):
+            # Skip marching if the streamline already starts on the base plane.
+            # This happens for tip-region streamlines whose back-face hugs the
+            # shock cone (high n_shape), where x_plot_break saturates at L over
+            # the last percent of the span. Without this guard the break
+            # condition `r*cos(θ)-L < 0` is false at step 1 and the streamline
+            # marches unbounded past L. The collapsed start point is left for
+            # the tip cap in mesh_panelization to fill in.
+            x_init = r_march[0] * np.cos(thet_march[0])
+            march_iter = range(1, len(thet_array)) if x_init < L * (1.0 - 1e-12) else range(0)
+
+            for i in march_iter:
                 d_theta = thet_array[i] - thet_array[i - 1]
                 r_cur = r_march[-1]
                 dr_dtheta = r_cur * Vr_Vtheta_ratio[i - 1]
@@ -119,14 +136,9 @@ class TRACE:
         u_fine = np.linspace(0, 1, 1000)
         x_sm, y_sm, z_sm = splev(u_fine, tck)
 
-        # Upper surface lines (free-stream streamlines)
-        idx_up = [0]
-        for i in range(1, N_up):
-            j = len(r_i_s_full) % N_up
-            if j == 0:
-                idx_up.append(int(i * (len(r_i_s_full) / N_up) - 1))
-            else:
-                idx_up.append(int(i * ((len(r_i_s_full) - j) / N_up) - 1))
+        # Upper surface lines (free-stream streamlines). Same convention as
+        # the lower surface: span from symmetry plane to just inboard of tip.
+        idx_up = np.linspace(0, M - 2, N_up).round().astype(int).tolist()
 
         upper_surface = []
         for temp2 in range(N_up):

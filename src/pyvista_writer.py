@@ -60,6 +60,73 @@ def _quantize_rgb(values, norm, cmap_obj, n_colors):
     return (cmap_obj(t)[:, :3] * 255).astype(np.uint8)
 
 
+def _mesh_bounds(mesh):
+    """Return (xmin, xmax, ymin, ymax, zmin, zmax) for a mesh dict."""
+    tris = np.asarray(mesh["triangles"], dtype=float)
+    pts = tris.reshape(-1, 3)
+    mins = pts.min(axis=0)
+    maxs = pts.max(axis=0)
+    return (mins[0], maxs[0], mins[1], maxs[1], mins[2], maxs[2])
+
+
+def _merge_bounds(bounds_list):
+    """Merge multiple (xmin, xmax, ymin, ymax, zmin, zmax) tuples."""
+    bounds_list = [b for b in bounds_list if b is not None]
+    if not bounds_list:
+        return None
+    arr = np.asarray(bounds_list, dtype=float)
+    return (
+        float(arr[:, 0].min()),
+        float(arr[:, 1].max()),
+        float(arr[:, 2].min()),
+        float(arr[:, 3].max()),
+        float(arr[:, 4].min()),
+        float(arr[:, 5].max()),
+    )
+
+
+def _bounds_center(bounds):
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    return np.array([
+        0.5 * (xmin + xmax),
+        0.5 * (ymin + ymax),
+        0.5 * (zmin + zmax),
+    ], dtype=float)
+
+
+def _fit_camera_to_bounds(plotter, bounds, margin=0.1, view_direction=None,
+                          view_up=None):
+    """Reposition camera to frame bounds while preserving orientation."""
+    if bounds is None:
+        return
+    xmin, xmax, ymin, ymax, zmin, zmax = bounds
+    center = _bounds_center(bounds)
+    span = np.array([xmax - xmin, ymax - ymin, zmax - zmin], dtype=float)
+    radius = 0.5 * np.linalg.norm(span)
+    if radius <= 1e-12:
+        radius = max(span.max(), 1.0) * 0.5
+
+    view_angle = float(getattr(plotter.camera, "view_angle", 30.0) or 30.0)
+    distance = (radius * (1.0 + margin)) / max(np.sin(np.deg2rad(view_angle) / 2.0), 1e-6)
+
+    if view_direction is None:
+        pos = np.asarray(plotter.camera.position, dtype=float)
+        focal = np.asarray(plotter.camera.focal_point, dtype=float)
+        view_direction = pos - focal
+    view_direction = np.asarray(view_direction, dtype=float)
+    norm = np.linalg.norm(view_direction)
+    if norm <= 1e-12:
+        view_direction = np.array([1.0, 1.0, 1.0], dtype=float)
+        norm = np.linalg.norm(view_direction)
+    view_direction /= norm
+
+    plotter.camera.focal_point = tuple(center)
+    plotter.camera.position = tuple(center + view_direction * distance)
+    if view_up is not None:
+        plotter.camera.view_up = tuple(view_up)
+    plotter.camera.reset_clipping_range()
+
+
 # ---------------------------------------------------------------------------
 # Surface scalar field
 # ---------------------------------------------------------------------------
@@ -77,6 +144,8 @@ def plot_scalar_field_pv(lower_mesh, lower_field,
                          background="white",
                          window_size=(1100, 800),
                          camera_position=None,
+                         auto_fit=True,
+                         fit_margin=0.05,
                          save_path=None,
                          plotter=None, return_plotter=False):
     """PyVista off-screen renderer of a scalar field on the surface mesh.
@@ -87,6 +156,9 @@ def plot_scalar_field_pv(lower_mesh, lower_field,
     If ``norm`` is provided (e.g. ``matplotlib.colors.TwoSlopeNorm``) the
     per-cell colors are baked through it and a hidden swatch mesh registers a
     faithful scalar bar.
+
+    If ``auto_fit`` is True, the camera is re-centered to the mesh bounds with
+    a small margin while keeping the current view orientation.
 
     Always renders off-screen to ``save_path``; there is no interactive
     viewer here.
@@ -166,11 +238,18 @@ def plot_scalar_field_pv(lower_mesh, lower_field,
                         opacity=0.0,
                         show_scalar_bar=True, scalar_bar_args=sb_args)
 
+        mesh_bounds = _merge_bounds([
+            _mesh_bounds(lower_mesh),
+            _mesh_bounds(upper_mesh) if upper_mesh is not None else None,
+        ])
+
         if camera_position is not None:
             plotter.camera_position = camera_position
         else:
             plotter.view_isometric()
-            plotter.camera.zoom(1.3)
+
+        if auto_fit:
+            _fit_camera_to_bounds(plotter, mesh_bounds, margin=fit_margin)
         if return_plotter:
             return plotter
         if save_path:
@@ -207,10 +286,12 @@ def _vsq_to_field(vsq, field, gamma, M1):
 
 def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
                              x_planes=None, n_grid=180,
+                             vehicle_length=None,
                              field="mach",
                              cmap="Spectral",
                              n_colors=10,
                              slice_alpha=0.55,
+                             slice_margin=0.05,
                              body_lower_alpha=1.0,
                              body_upper_alpha=1.0,
                              shock_line_width=4.0,
@@ -218,12 +299,17 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
                              background="white",
                              window_size=(1300, 900),
                              camera_position=None,
+                             auto_fit=True,
+                             fit_margin=0,
                              save_path=None):
     """PyVista off-screen renderer of body + flowfield slices.
 
     Body is opaque; the slice planes are translucent (``slice_alpha``)
     so the body shows through them. Default camera matches the matplotlib
     flowfield view (elev=-12°, azim=-65°).
+
+    ``slice_margin`` controls the padding around the body/shock on each slice,
+    and ``auto_fit`` re-centers the camera to include body plus all slices.
     """
     import pyvista as pv
     from scipy.interpolate import interp1d
@@ -246,6 +332,14 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
                           bounds_error=False,
                           fill_value=(Vsq_tm[-1], Vsq_tm[0]))
     Vsq_inf = 1.0 / (2.0 / ((gamma - 1.0) * M1**2) + 1.0)
+
+    body_bounds = _merge_bounds([
+        _mesh_bounds(lower_mesh),
+        _mesh_bounds(upper_mesh),
+    ])
+    body_center = _bounds_center(body_bounds)
+    myHeight = body_bounds[5] - body_bounds[4]
+    myWidth = body_bounds[3] - body_bounds[2]
 
     with pv.vtk_verbosity('off'):
 
@@ -270,10 +364,9 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
 
         # Default camera
         if camera_position is None:
-            focal = (L / 2.0 + 0.25 * L, 0.0, -Rs / 4.0)
             camera_position = _camera_from_elev_azim(
                 elev_deg=-12.0, azim_deg=-65.0,
-                focal=focal, distance=1.6 * L,
+                focal=body_center, distance=1.0,
                 view_up=(0.0, 0.0, 1.0),
             )
 
@@ -289,6 +382,7 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
             show_edges=show_edges,
             background=background, window_size=window_size,
             camera_position=camera_position,
+            auto_fit=False,
             return_plotter=True,
         )
 
@@ -300,10 +394,11 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
         Z_LE = np.asarray(le["z"], dtype=float)
         phi_LE = np.arctan2(Y_LE, -Z_LE)
 
-        if x_planes is None:
-            x_planes = [0.45 * L, 0.7 * L, 1.0 * L]
+        myL = L
+        if vehicle_length is not None: myL = vehicle_length
+        if x_planes is None: x_planes = [L - 0.85 * myL, L - 0.4 * myL, L]
 
-        extent = 1.15 * Rs
+        slice_bounds = []
 
         for x_p in x_planes:
             cap = X_LE <= x_p + 1e-12
@@ -344,9 +439,17 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
             rupper_interp = interp1d(phi_up[uu], rho_up[uu], kind="linear",
                                     bounds_error=False, fill_value=Rs_xp)
 
+            r_body_max = float(np.max(rho_body)) if rho_body.size else 0.0
+            r_upper_max = float(np.max(rho_up)) if rho_up.size else 0.0
+            r_base = max(Rs_xp, r_body_max, r_upper_max)
+            extent = max(r_base * (1.0 + slice_margin), 1e-6)
+            slice_bounds.append((x_p, x_p, 
+                                 body_center[1] - 0.75 * myWidth, body_center[1] + 0.75 * myWidth,
+                                 body_center[2] - 2.0 * myHeight, body_center[2] + 1.0*myHeight))
+
             # 2-D (y, z) grid on the slice
-            y_lin = np.linspace(-extent, extent, n_grid)
-            z_lin = np.linspace(-extent, extent / 6, n_grid)
+            y_lin = np.linspace(body_center[1] - 0.75 * myWidth, body_center[1] + 0.75 * myWidth, n_grid)
+            z_lin = np.linspace(body_center[2] - 2.0 * myHeight, body_center[2] + 1.0*myHeight, n_grid)
             Y, Z  = np.meshgrid(y_lin, z_lin)
             rho_g   = np.hypot(Y, Z)
             theta_g = np.arctan2(rho_g, x_p)
@@ -409,6 +512,10 @@ def plot_flowfield_slices_pv(geom, lower_mesh, upper_mesh,
             plotter.add_mesh(arc, color="black", line_width=0.5,
                             render_lines_as_tubes=False, show_scalar_bar=False)
 
+    plotter.camera.reset_clipping_range()
+    if auto_fit:
+        scene_bounds = _merge_bounds([body_bounds] + slice_bounds)
+        _fit_camera_to_bounds(plotter, scene_bounds, margin=fit_margin)
     if save_path:
         plotter.screenshot(save_path)
     plotter.close()

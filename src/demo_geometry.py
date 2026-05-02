@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from waverider import Waverider
+from Waverider import Waverider
 from pyvista_writer import plot_geometry_grid_pv
 
 

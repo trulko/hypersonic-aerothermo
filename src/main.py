@@ -10,24 +10,40 @@ import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from waverider import Waverider
+from Waverider import Waverider
 
 print("Making Waverider geometry...")
 # Note: to play with the upper trailing edge parameters, see:
 # https://www.desmos.com/calculator/ertbddykms
-wv = Waverider(
+wv_inviscid = Waverider(
     M1 = 6,           # Freestream Mach number
     gamma = 1.4,      # Ratio of specific heats
     min_height = 3,   # [m]
     min_area = 100,   # [m^2]
     min_volume = 250, # [m^3]
-    beta = 16.5,      # Input: shock angle [degrees]
-    R1_frac = 0.43,   # Input: roughly controls height
-    W2_frac = 0.8,    # Input: roughly controls width
-    n_shape = 1.08,   # Input: roughly controls roundness
+    beta = 13.791,    # Input: shock angle [degrees]
+    R1_frac = 0.348,  # Input: roughly controls height
+    W2_frac = 0.605,  # Input: roughly controls width
+    n_shape = 4.215,  # Input: roughly controls roundness
     N = 500,          # Resolution of the leading edge
     N_l = 30,         # Resulution of the upper, lower surfaces
 )
+wv_viscous = Waverider(
+    M1 = 6,           # Freestream Mach number
+    gamma = 1.4,      # Ratio of specific heats
+    min_height = 3,   # [m]
+    min_area = 100,   # [m^2]
+    min_volume = 250, # [m^3]
+    beta = 11.3967,    # Input: shock angle [degrees]
+    R1_frac = 0.835,  # Input: roughly controls height
+    W2_frac = 0.36,  # Input: roughly controls width
+    n_shape = 1.04,  # Input: roughly controls roundness
+    N = 500,          # Resolution of the leading edge
+    N_l = 30,         # Resulution of the upper, lower surfaces
+)
+
+# Choose the waverider
+wv = wv_viscous
 
 print("Analyzing aerothermodynamics...")
 wv.aerothermodynamics(
@@ -41,11 +57,11 @@ wv.aerothermodynamics(
 )
 
 # Plotting requires pyvista to be installed
-output_dir = "../runs/demo/"
+output_dir = "../runs/optimized_viscous/"
 wv.plot(output_dir)
 
 # Print
 wv.report()
 
 # Uncomment to show an interactive 3D plot of the geometry
-wv.interactive()
+# wv.interactive()

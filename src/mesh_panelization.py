@@ -189,6 +189,54 @@ def panelize_geometry(geom):
     if np.any(upper_flip):
         upper_norms[upper_flip] *= -1.0
 
+    # ── Tip caps ────────────────────────────────────────────────────────────
+    # The outermost streamline stops one index short of the wing tip (where
+    # LE and TE coincide). Close the resulting thin sliver on each side and
+    # surface with a single triangle that fans the streamline LE-start and
+    # TE-end to the tip vertex. Orient via interior_pt; do not apply the
+    # z-direction enforcement, since these triangles are nearly vertical.
+    # le = geom["leading_edge"]
+    # tip_pos = np.array([le["x"][-1], le["y"][-1], le["z"][-1]])
+    # tip_neg = np.array([le["x"][0],  le["y"][0],  le["z"][0]])
+
+    # def _tip_tri(A, B, C):
+    #     e1, e2 = B - A, C - A
+    #     cross = np.cross(e1, e2)
+    #     area = 0.5 * np.linalg.norm(cross)
+    #     n = cross / (2.0 * area) if area > 1e-30 else cross
+    #     return np.stack([A, B, C]), n, area
+
+    # def _append_tip_caps(tris, norms, areas, caps):
+    #     cap_tris  = np.stack([c[0] for c in caps])
+    #     cap_norms = np.stack([c[1] for c in caps])
+    #     cap_areas = np.array([c[2] for c in caps])
+    #     cap_norms = _orient_outward(cap_tris, cap_norms, cap_areas, interior_pt)
+    #     return (np.vstack([tris, cap_tris]),
+    #             np.vstack([norms, cap_norms]),
+    #             np.concatenate([areas, cap_areas]))
+
+    # out_lo = geom["lower_surface"][-1]
+    # lo_pos = np.asarray(out_lo["curve"], dtype=float)
+    # lo_neg = np.asarray(out_lo["mirrored_curve"], dtype=float)
+    # lower_tris, lower_norms, lower_areas = _append_tip_caps(
+    #     lower_tris, lower_norms, lower_areas,
+    #     [_tip_tri(lo_pos[0], lo_pos[-1], tip_pos),
+    #      _tip_tri(lo_neg[0], lo_neg[-1], tip_neg)],
+    # )
+
+    # out_up = geom["upper_surface"][-1]
+    # x_up = np.asarray(out_up["x"], dtype=float)
+    # y_up_o, z_up_o = float(out_up["y"]), float(out_up["z"])
+    # up_pos_start = np.array([x_up[0],  y_up_o, z_up_o])
+    # up_pos_end   = np.array([x_up[-1], y_up_o, z_up_o])
+    # up_neg_start = np.array([x_up[0],  -y_up_o, z_up_o])
+    # up_neg_end   = np.array([x_up[-1], -y_up_o, z_up_o])
+    # upper_tris, upper_norms, upper_areas = _append_tip_caps(
+    #     upper_tris, upper_norms, upper_areas,
+    #     [_tip_tri(up_pos_start, up_pos_end, tip_pos),
+    #      _tip_tri(up_neg_start, up_neg_end, tip_neg)],
+    # )
+
     def _build(tris, norms, areas):
         return {
             "triangles": tris,
