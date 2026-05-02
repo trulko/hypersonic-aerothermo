@@ -173,12 +173,21 @@ def panelize_geometry(geom):
     upper_norms = np.vstack([un, vn])
     upper_areas = np.concatenate([ua, va])
 
-    # Orient normals consistently outward using a point inside the volume
+    # Orient normals consistently outward using a point inside the volume.
+    # The surface set is open (no sidewalls), so enforce per-triangle z
+    # orientation after the interior-point pass to keep lower normals
+    # pointing downward and upper normals upward.
     lower_centroids = lower_tris.mean(axis=1)
     upper_centroids = upper_tris.mean(axis=1)
     interior_pt = 0.5 * (lower_centroids.mean(axis=0) + upper_centroids.mean(axis=0))
     lower_norms = _orient_outward(lower_tris, lower_norms, lower_areas, interior_pt)
     upper_norms = _orient_outward(upper_tris, upper_norms, upper_areas, interior_pt)
+    lower_flip = lower_norms[:, 2] > 0.0
+    if np.any(lower_flip):
+        lower_norms[lower_flip] *= -1.0
+    upper_flip = upper_norms[:, 2] < 0.0
+    if np.any(upper_flip):
+        upper_norms[upper_flip] *= -1.0
 
     def _build(tris, norms, areas):
         return {
