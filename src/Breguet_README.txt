@@ -45,7 +45,7 @@ Breguet.py with the current project assumptions and prints a formatted summary
 to the terminal.
 
 Current assumptions used in Breguet_runner.py:
-- Vehicle volume = 750 m^3
+- Vehicle volume = from main.py baseline waverider geometry
 - Required thrust = 468,393.5 N when THRUST_SOURCE = "hardcoded"
 - Required thrust can be recomputed from Thruster_I_Hardly_Even_Know_Her.py
   when THRUST_SOURCE = "thruster"
@@ -53,6 +53,8 @@ Current assumptions used in Breguet_runner.py:
 - Lift-to-drag ratio, L/D = from main.py when L_OVER_D_SOURCE = "main"
 - Specific impulse, Isp = 1900 s
 - Number of engines = 2
+- Fuel storage volume uses JP-7 density = 803 kg/m^3, using the X-51A
+  JP-7 fuel choice as the reference.
 
 What it prints:
 - Range
@@ -61,6 +63,8 @@ What it prints:
 - Cruise Mach number
 - Cruise speed
 - Time of flight
+- Vehicle volume
+- Volume source
 - Lift-to-drag ratio
 - Specific impulse
 - Number of engines
@@ -73,6 +77,9 @@ What it prints:
 - Powerplant mass
 - Mass per engine
 - Required fuel mass
+- JP-7 fuel density
+- Required fuel volume
+- X-51A fuel volume equivalent
 - Zero-fuel mass
 - Takeoff mass
 - Takeoff weight
