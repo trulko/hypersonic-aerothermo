@@ -46,6 +46,9 @@ def build_waverider() -> Waverider:
 
     # Choose the waverider
     wv = wv_viscous
+
+    wv.aerothermodynamics()
+
     return wv
 
 def main() -> None:
