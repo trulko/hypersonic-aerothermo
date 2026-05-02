@@ -46,9 +46,11 @@ to the terminal.
 
 Current assumptions used in Breguet_runner.py:
 - Vehicle volume = 750 m^3
-- Required thrust = 691,859.6 N
+- Required thrust = 468,393.5 N when THRUST_SOURCE = "hardcoded"
+- Required thrust can be recomputed from Thruster_I_Hardly_Even_Know_Her.py
+  when THRUST_SOURCE = "thruster"
 - Engine thrust-to-weight ratio = 8.3 from engine_sizing.py
-- Lift-to-drag ratio, L/D = 3.7879
+- Lift-to-drag ratio, L/D = from main.py when L_OVER_D_SOURCE = "main"
 - Specific impulse, Isp = 1900 s
 - Number of engines = 2
 
@@ -63,6 +65,7 @@ What it prints:
 - Specific impulse
 - Number of engines
 - Required thrust
+- Required thrust source
 - Engine thrust-to-weight ratio
 - Mass ratio Wi/Wf
 - Payload mass
@@ -127,3 +130,12 @@ To use the reusable function in another script:
 To run the assumption-based script directly from src:
 
     ..\.venv\Scripts\python.exe Breguet_runner.py
+
+To choose whether thrust is fast/hardcoded or fully recomputed, edit this
+setting in Breguet_runner.py:
+
+    THRUST_SOURCE = "hardcoded"
+
+or:
+
+    THRUST_SOURCE = "thruster"

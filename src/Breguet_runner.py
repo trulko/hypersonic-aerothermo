@@ -5,16 +5,16 @@ from __future__ import annotations
 from Breguet import calculate_breguet_range_estimate
 from engine_sizing import estimate_engine_sizing
 from main import build_waverider
+from Thruster_I_Hardly_Even_Know_Her import Thruster_I_Hardly_Even_Know_Her
 
 
 ASSUMED_VOLUME_M3 = 750.0
-# This thrust preserves the earlier 8,500 kg powerplant assumption when using
-# the hard-coded engine T/W = 8.3 in engine_sizing.py.
-ASSUMED_REQUIRED_THRUST_N = 691859.6
+HARDCODED_REQUIRED_THRUST_N = 468393.5
 HARDCODED_L_OVER_D = 4.4656
 ASSUMED_ISP_S = 1900.0
 ASSUMED_ENGINE_COUNT = 2
 L_OVER_D_SOURCE = "main"
+THRUST_SOURCE = "hardcoded"
 
 
 def get_lift_to_drag() -> tuple[float, str]:
@@ -29,11 +29,21 @@ def get_lift_to_drag() -> tuple[float, str]:
     raise ValueError("L_OVER_D_SOURCE must be either 'main' or 'hardcoded'.")
 
 
+def get_required_thrust() -> tuple[float, str]:
+    """Return required thrust and a short label describing where it came from."""
+    if THRUST_SOURCE == "hardcoded":
+        return HARDCODED_REQUIRED_THRUST_N, "hardcoded"
+    if THRUST_SOURCE == "thruster":
+        return Thruster_I_Hardly_Even_Know_Her().required_thrust_N, "Thruster_I_Hardly_Even_Know_Her.py"
+    raise ValueError("THRUST_SOURCE must be either 'hardcoded' or 'thruster'.")
+
+
 def main() -> None:
     lift_to_drag, lift_to_drag_source = get_lift_to_drag()
+    required_thrust_N, required_thrust_source = get_required_thrust()
 
     engine_sizing = estimate_engine_sizing(
-        required_thrust_N=ASSUMED_REQUIRED_THRUST_N,
+        required_thrust_N=required_thrust_N,
         engine_count=ASSUMED_ENGINE_COUNT,
     )
 
@@ -57,6 +67,7 @@ def main() -> None:
     print(f"  Specific impulse          = {estimate.specific_impulse_s:,.1f} s")
     print(f"  Number of engines         = {estimate.engine_count}")
     print(f"  Required thrust           = {engine_sizing.required_thrust_N:,.1f} N")
+    print(f"  Required thrust source    = {required_thrust_source}")
     print(f"  Engine thrust/weight      = {engine_sizing.thrust_to_weight_ratio:.2f}")
     print(f"  Mass ratio Wi/Wf          = {estimate.mass_ratio:.4f}")
     print("")
