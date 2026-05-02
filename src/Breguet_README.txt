@@ -46,7 +46,8 @@ to the terminal.
 
 Current assumptions used in Breguet_runner.py:
 - Vehicle volume = 750 m^3
-- Powerplant mass = 8,500 kg
+- Required thrust = 691,859.6 N
+- Engine thrust-to-weight ratio = 8.3 from engine_sizing.py
 - Lift-to-drag ratio, L/D = 3.7879
 - Specific impulse, Isp = 1900 s
 - Number of engines = 2
@@ -61,10 +62,13 @@ What it prints:
 - Lift-to-drag ratio
 - Specific impulse
 - Number of engines
+- Required thrust
+- Engine thrust-to-weight ratio
 - Mass ratio Wi/Wf
 - Payload mass
 - Airframe mass
 - Powerplant mass
+- Mass per engine
 - Required fuel mass
 - Zero-fuel mass
 - Takeoff mass
@@ -92,11 +96,13 @@ conceptual estimate, not a full mission fuel analysis.
 Connection to weight.py
 -----------------------
 
-Both scripts rely on weight.py to estimate the aircraft mass from:
+Breguet_runner.py first uses engine_sizing.py to estimate dry powerplant mass
+from required thrust and engine thrust-to-weight ratio. Then Breguet.py and
+weight.py estimate the aircraft mass from:
 - enclosed vehicle volume
 - payload assumptions
 - airframe mass-per-volume estimate
-- user-supplied powerplant mass
+- powerplant mass from engine_sizing.py
 - computed fuel mass
 
 This means the Breguet fuel estimate and the aircraft weight estimate are
