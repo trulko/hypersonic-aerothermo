@@ -21,6 +21,7 @@ wv = GeometryOptimizer(
     emissivity = 0.9, # [-] (typical for high-temp composites)
     safety_factor = 1.5, # [-] (safety factor for the bluntness sizing)
     viscous = True,   # Include viscous effects in the optimization?
+    optimizeThrust = True, # Whether to minimize volume/(L/D) instead of maximizing L/D
     resample = 200,   # per-streamline resampling resolution for the boundary layer integration
     n_theta = 20,     # number of polar angle samples for Taylor-Maccoll
     N_opt = 220,      # Leading edge resolution during optimization (lower is faster, but less accurate)
@@ -32,7 +33,7 @@ wv = GeometryOptimizer(
 )
 
 # Plotting requires pyvista to be installed
-output_dir = "../runs/optimized/"
+output_dir = "../runs/optimized2/"
 wv.plot(output_dir)
 
 # Print

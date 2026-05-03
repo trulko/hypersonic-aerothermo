@@ -17,7 +17,9 @@ def build_waverider() -> Waverider:
     print("Making Waverider geometry...")
     # Note: to play with the upper trailing edge parameters, see:
     # https://www.desmos.com/calculator/ertbddykms
-    wv_inviscid = Waverider(
+
+    # The waverider which maximizes inviscid L/D
+    wv_inviscid_ld = Waverider(
         M1 = 6,           # Freestream Mach number
         gamma = 1.4,      # Ratio of specific heats
         min_height = 3,   # [m]
@@ -30,7 +32,9 @@ def build_waverider() -> Waverider:
         N = 500,          # Resolution of the leading edge
         N_l = 30,         # Resulution of the upper, lower surfaces
     )
-    wv_viscous = Waverider(
+
+    # The waverider which maximizes viscous L/D
+    wv_viscous_ld = Waverider(
         M1 = 6,           # Freestream Mach number
         gamma = 1.4,      # Ratio of specific heats
         min_height = 3,   # [m]
@@ -44,8 +48,23 @@ def build_waverider() -> Waverider:
         N_l = 30,         # Resulution of the upper, lower surfaces
     )
 
-    # Choose the waverider
-    wv = wv_viscous
+    # The waverider which minimizes volume/(L/D) (i.e., optimizes for thrust-to-weight)
+    wv_viscous_thrust = Waverider(
+        M1 = 6,           # Freestream Mach number
+        gamma = 1.4,      # Ratio of specific heats
+        min_height = 3,   # [m]
+        min_area = 100,   # [m^2]
+        min_volume = 250, # [m^3]
+        beta = 12.513,    # Input: shock angle [degrees]
+        R1_frac = 0.419,  # Input: roughly controls height
+        W2_frac = 0.657,  # Input: roughly controls width
+        n_shape = 1.136,  # Input: roughly controls roundness
+        N = 500,          # Resolution of the leading edge
+        N_l = 30,         # Resulution of the upper, lower surfaces
+    )
+
+    # Choose the waverider to run with
+    wv = wv_viscous_thrust
 
     wv.aerothermodynamics(
         T_inf = 216.65,   # K   (~20 km standard atmosphere)

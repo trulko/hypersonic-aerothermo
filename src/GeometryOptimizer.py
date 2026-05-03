@@ -48,7 +48,8 @@ def _objective(
     n_theta: int,
     N: int,
     N_l: int,
-    viscous: bool = True
+    viscous: bool = True,
+    optimizeThrust: bool = True
 ) -> float:
     beta, r1_frac, w2_frac, n_shape = params
     try:
@@ -79,9 +80,11 @@ def _objective(
             ld = wv.LD_total
         else:
             ld = wv.inviscid_aerodynamics()
+        vol = wv.panel.volume
+        J = vol / ld if optimizeThrust else -ld
     except Exception: return float("inf")
-    if not np.isfinite(ld): return float("inf")
-    return float(-ld)
+    if not np.isfinite(J): return float("inf")
+    return float(J)
 
 # Progress bar
 class _ProgressBar:
@@ -112,6 +115,7 @@ def _optimize_waverider(
     emissivity: float,
     safety_factor: float,
     viscous: bool,
+    optimizeThrust: bool,
     resample: int,
     n_theta: int,
     N_opt: int,
@@ -133,7 +137,8 @@ def _optimize_waverider(
         return False
     
     inputs = (M1, gamma, min_height, min_area, min_volume, T_inf, p_inf, T_allow,
-              emissivity, safety_factor, resample, n_theta, N_opt, Nl_opt, viscous)
+              emissivity, safety_factor, resample, n_theta, N_opt, Nl_opt, viscous, 
+              optimizeThrust)
 
     result = differential_evolution(
         _objective,
@@ -171,6 +176,7 @@ def GeometryOptimizer(
     emissivity: float,
     safety_factor: float,
     viscous: bool = True,
+    optimizeThrust: bool = True,
     resample: int = 200,
     n_theta: int = 20,
     N_opt: int = 220,
@@ -196,6 +202,7 @@ def GeometryOptimizer(
         emissivity: Emissivity for aerothermo [-]
         safety_factor: Safety factor for bluntness sizing in aerothermo [-]
         viscous: Whether to include viscous effects in the L/D evaluation
+        optimizeThrust: Whether to minimize volume/(L/D) instead of maximizing L/D
         resample: Resampling resolution for boundary layer integration in aerothermo
         n_theta: Number of polar angle samples for Taylor-Maccoll in aerothermo
         N_opt: Leading edge resolution during optimization (lower is faster, but less accurate)
@@ -210,8 +217,8 @@ def GeometryOptimizer(
     """
     # Run optimization to find best geometry parameters
     optimal_parameters = _optimize_waverider(
-        M1, gamma, min_height, min_area, min_volume, T_inf, p_inf, T_allow, 
-        emissivity, safety_factor, viscous, resample, n_theta, N_opt, N_l_opt, 
+        M1, gamma, min_height, min_area, min_volume, T_inf, p_inf, T_allow, emissivity,
+        safety_factor, viscous, optimizeThrust, resample, n_theta, N_opt, N_l_opt, 
         maxiter, popsize, seed
     )
     # Generate the final waverider with the optimal parameters at high resolution
