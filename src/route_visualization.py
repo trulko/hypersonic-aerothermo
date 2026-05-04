@@ -34,6 +34,9 @@ from scipy.optimize import minimize
 
 EARTH_RADIUS_KM = 6371.0
 FT_TO_M = 0.3048
+GAMMA_AIR = 1.4
+R_AIR_J_PER_KG_K = 287.05
+CRUISE_MACH = 6.0
 CRUISE_ALTITUDE_FT = 70000.0
 CRUISE_ALTITUDE_KM = CRUISE_ALTITUDE_FT * FT_TO_M / 1000.0
 FLIGHT_PATH_RADIUS_KM = EARTH_RADIUS_KM + CRUISE_ALTITUDE_KM
@@ -151,6 +154,41 @@ def flight_path_distance_km(surface_distance_km: float) -> float:
     return surface_distance_km * FLIGHT_PATH_RADIUS_KM / EARTH_RADIUS_KM
 
 
+def isa_temperature_k(altitude_m: float) -> float:
+    if altitude_m < 0.0:
+        raise ValueError("altitude_m must be non-negative.")
+    if altitude_m <= 11000.0:
+        return 288.15 - 0.0065 * altitude_m
+    if altitude_m <= 20000.0:
+        return 216.65
+    if altitude_m <= 32000.0:
+        return 216.65 + 0.001 * (altitude_m - 20000.0)
+
+    raise ValueError("Altitude is outside the ISA layer range handled by this script.")
+
+
+def mach_velocity_m_s(mach: float, temperature_k: float) -> float:
+    if mach <= 0.0:
+        raise ValueError("mach must be positive.")
+    if temperature_k <= 0.0:
+        raise ValueError("temperature_k must be positive.")
+
+    return mach * np.sqrt(GAMMA_AIR * R_AIR_J_PER_KG_K * temperature_k)
+
+
+def time_of_flight_hr(distance_km: float, speed_m_s: float) -> float:
+    if distance_km < 0.0:
+        raise ValueError("distance_km must be non-negative.")
+    if speed_m_s <= 0.0:
+        raise ValueError("speed_m_s must be positive.")
+
+    return distance_km * 1000.0 / speed_m_s / 3600.0
+
+
+def static_pressure_pa(density_kg_m3: np.ndarray, temperature_k: np.ndarray) -> np.ndarray:
+    return density_kg_m3 * R_AIR_J_PER_KG_K * temperature_k
+
+
 def cumulative_sampled_distances_km(lat_deg: np.ndarray, lon_deg: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     cumulative_surface_km = np.zeros(len(lat_deg), dtype=float)
     cumulative_flight_km = np.zeros(len(lat_deg), dtype=float)
@@ -164,6 +202,73 @@ def cumulative_sampled_distances_km(lat_deg: np.ndarray, lon_deg: np.ndarray) ->
         cumulative_flight_km[i] = cumulative_flight_km[i - 1] + flight_path_distance_km(segment_surface_km)
 
     return cumulative_surface_km, cumulative_flight_km
+
+
+def nearest_route_distance_km(
+    point: Waypoint,
+    route_lat_deg: np.ndarray,
+    route_lon_deg: np.ndarray,
+    cumulative_flight_km: np.ndarray,
+) -> float:
+    point_lat_rad = np.deg2rad(point.lat_deg)
+    point_lon_rad = np.deg2rad(point.lon_deg)
+    route_lat_rad = np.deg2rad(route_lat_deg)
+    route_lon_rad = np.deg2rad(route_lon_deg)
+
+    angular_distance = np.arccos(
+        np.clip(
+            np.sin(point_lat_rad) * np.sin(route_lat_rad)
+            + np.cos(point_lat_rad) * np.cos(route_lat_rad) * np.cos(route_lon_rad - point_lon_rad),
+            -1.0,
+            1.0,
+        )
+    )
+    nearest_idx = int(np.argmin(angular_distance))
+    return float(cumulative_flight_km[nearest_idx])
+
+
+def route_interest_markers(
+    points: list[Waypoint],
+    regions: list[FlyoverRegion],
+    route_lat_deg: np.ndarray,
+    route_lon_deg: np.ndarray,
+    cumulative_flight_km: np.ndarray,
+) -> list[tuple[str, float, float, float]]:
+    region_lookup = {region.name: region for region in regions}
+    markers = []
+    route_lat_rad = np.deg2rad(route_lat_deg)
+    route_lon_rad = np.deg2rad(route_lon_deg)
+
+    for point in points[1:-1]:
+        center_distance_km = nearest_route_distance_km(point, route_lat_deg, route_lon_deg, cumulative_flight_km)
+        region = region_lookup.get(point.name)
+        if region is None:
+            markers.append((point.name, center_distance_km, center_distance_km, center_distance_km))
+            continue
+
+        region_lat_rad = np.deg2rad(region.lat_deg)
+        region_lon_rad = np.deg2rad(region.lon_deg)
+        angular_distance = np.arccos(
+            np.clip(
+                np.sin(region_lat_rad) * np.sin(route_lat_rad)
+                + np.cos(region_lat_rad) * np.cos(route_lat_rad) * np.cos(route_lon_rad - region_lon_rad),
+                -1.0,
+                1.0,
+            )
+        )
+        inside_region = angular_distance <= region.radius_km / EARTH_RADIUS_KM
+        if np.any(inside_region):
+            inside_distances = cumulative_flight_km[inside_region]
+            start_km = float(inside_distances[0])
+            end_km = float(inside_distances[-1])
+            center_distance_km = 0.5 * (start_km + end_km)
+        else:
+            start_km = center_distance_km
+            end_km = center_distance_km
+
+        markers.append((point.name, center_distance_km, start_km, end_km))
+
+    return markers
 
 
 def destination_point(
@@ -572,30 +677,114 @@ def evaluate_density_profile_nrlmsis(
     return density_kg_m3, temperature_k
 
 
-def plot_density_vs_distance(
+def plot_atmosphere_property_vs_distance(
     distance_km: np.ndarray,
-    density_kg_m3: np.ndarray,
+    values: np.ndarray,
+    *,
+    ylabel: str,
+    title: str,
+    line_color: str,
+    fill_color: str,
+    interest_markers: list[tuple[str, float, float, float]] | None = None,
     save_path: str | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     fig, ax = plt.subplots(figsize=(11, 5.8), constrained_layout=True)
     fig.patch.set_facecolor("#f6f4ed")
     ax.set_facecolor("white")
 
-    ax.plot(distance_km, density_kg_m3, color="#0f4c81", lw=2.5)
-    ax.fill_between(distance_km, density_kg_m3, color="#7fb7df", alpha=0.25)
+    ax.plot(distance_km, values, color=line_color, lw=2.5)
+    ax.fill_between(distance_km, values, color=fill_color, alpha=0.25)
     ax.set_xlabel("Distance Traveled at 70,000 ft [km]")
-    ax.set_ylabel(r"Density [kg/m$^3$]")
-    ax.set_title("NRLMSIS 2.0 Mean Density Along the Optimized Route")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
     ax.grid(True, color="#d7dde3", linewidth=0.8)
-    y_min = float(density_kg_m3.min())
-    y_max = float(density_kg_m3.max())
-    padding = 0.15 * (y_max - y_min if y_max > y_min else y_max)
+    y_min = float(values.min())
+    y_max = float(values.max())
+    padding = 0.15 * (y_max - y_min if y_max > y_min else abs(y_max))
     ax.set_ylim(y_min - padding, y_max + padding)
+
+    if interest_markers is not None:
+        band_colors = ["#bfdbfe", "#fde68a", "#bbf7d0", "#fecdd3", "#ddd6fe"]
+        for idx, (label, marker_distance_km, start_km, end_km) in enumerate(interest_markers):
+            band_color = band_colors[idx % len(band_colors)]
+            if end_km > start_km:
+                ax.axvspan(start_km, end_km, color=band_color, alpha=0.34, lw=0, zorder=1)
+                ax.axvline(start_km, color="#374151", lw=0.7, ls=":", alpha=0.55, zorder=3)
+                ax.axvline(end_km, color="#374151", lw=0.7, ls=":", alpha=0.55, zorder=3)
+            ax.axvline(marker_distance_km, color="#111827", lw=1.0, ls="--", alpha=0.7, zorder=3)
+            ax.text(
+                marker_distance_km,
+                0.97 if idx % 2 == 0 else 0.84,
+                label,
+                transform=ax.get_xaxis_transform(),
+                rotation=90,
+                rotation_mode="anchor",
+                ha="right",
+                va="top",
+                fontsize=8,
+                color="#111827",
+                bbox=dict(boxstyle="round,pad=0.18", facecolor="white", edgecolor="none", alpha=0.78),
+                zorder=4,
+            )
 
     if save_path is not None:
         fig.savefig(save_path, dpi=220, bbox_inches="tight")
 
     return fig, ax
+
+
+def plot_density_vs_distance(
+    distance_km: np.ndarray,
+    density_kg_m3: np.ndarray,
+    interest_markers: list[tuple[str, float, float, float]] | None = None,
+    save_path: str | None = None,
+) -> tuple[plt.Figure, plt.Axes]:
+    return plot_atmosphere_property_vs_distance(
+        distance_km,
+        density_kg_m3,
+        ylabel=r"Atmospheric Density [kg/m$^3$]",
+        title="NRLMSIS 2.0 Mean Atmospheric Density Along the Optimized Route",
+        line_color="#0f4c81",
+        fill_color="#7fb7df",
+        interest_markers=interest_markers,
+        save_path=save_path,
+    )
+
+
+def plot_temperature_vs_distance(
+    distance_km: np.ndarray,
+    temperature_k: np.ndarray,
+    interest_markers: list[tuple[str, float, float, float]] | None = None,
+    save_path: str | None = None,
+) -> tuple[plt.Figure, plt.Axes]:
+    return plot_atmosphere_property_vs_distance(
+        distance_km,
+        temperature_k,
+        ylabel="Atmospheric Temperature [K]",
+        title="NRLMSIS 2.0 Mean Atmospheric Temperature Along the Optimized Route",
+        line_color="#9a3412",
+        fill_color="#fdba74",
+        interest_markers=interest_markers,
+        save_path=save_path,
+    )
+
+
+def plot_pressure_vs_distance(
+    distance_km: np.ndarray,
+    pressure_pa: np.ndarray,
+    interest_markers: list[tuple[str, float, float, float]] | None = None,
+    save_path: str | None = None,
+) -> tuple[plt.Figure, plt.Axes]:
+    return plot_atmosphere_property_vs_distance(
+        distance_km,
+        pressure_pa,
+        ylabel="Atmospheric Static Pressure [Pa]",
+        title="Atmospheric Static Pressure Along the Optimized Route",
+        line_color="#2f6f4e",
+        fill_color="#86c69a",
+        interest_markers=interest_markers,
+        save_path=save_path,
+    )
 
 
 def plot_route_map(
@@ -606,8 +795,8 @@ def plot_route_map(
     save_path: str | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
     fig, ax = plt.subplots(figsize=(14, 7), constrained_layout=True)
-    fig.patch.set_facecolor("#f6f4ed")
-    ax.set_facecolor("#dfeaf4")
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
 
     ax.set_xlim(-180, 180)
     ax.set_ylim(-90, 90)
@@ -615,15 +804,26 @@ def plot_route_map(
     ax.set_ylabel("Latitude [deg]")
     ax.set_title("Optimized Sweden-to-Singapore Overflight Route")
 
+    texture = load_earth_texture()
+    if texture is not None:
+        ax.imshow(
+            texture,
+            extent=(-180, 180, -90, 90),
+            origin="upper",
+            interpolation="bilinear",
+            aspect="auto",
+            zorder=-2,
+        )
+
     for lon in range(-180, 181, 30):
-        ax.plot([lon, lon], [-90, 90], color="white", lw=0.8, alpha=0.8, zorder=0)
+        ax.plot([lon, lon], [-90, 90], color="white", lw=0.7, alpha=0.55, zorder=0)
     for lat in range(-90, 91, 15):
-        ax.plot([-180, 180], [lat, lat], color="white", lw=0.8, alpha=0.8, zorder=0)
+        ax.plot([-180, 180], [lat, lat], color="white", lw=0.7, alpha=0.55, zorder=0)
 
     for region in regions:
         boundary_lat, boundary_lon = region_boundary_latlon(region)
         for seg_lat, seg_lon in split_dateline(boundary_lat, boundary_lon):
-            ax.plot(seg_lon, seg_lat, color="#4aa3d8", lw=1.4, ls="--", alpha=0.9, zorder=1)
+            ax.plot(seg_lon, seg_lat, color="#9be7ff", lw=1.5, ls="--", alpha=0.95, zorder=1)
 
     anchor_leg_lat, anchor_leg_lon = build_piecewise_route(anchor_points, n_points_per_leg=120)
     for seg_lat, seg_lon in split_dateline(anchor_leg_lat, anchor_leg_lon):
@@ -648,8 +848,9 @@ def plot_route_map(
             point.lat_deg + (2.0 if point.lat_deg < 75 else -4.0),
             f"{idx}. {point.name}",
             fontsize=9,
-            color="#102542",
+            color="white",
             zorder=7,
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="#111827", edgecolor="none", alpha=0.62),
         )
 
     if save_path is not None:
@@ -927,6 +1128,7 @@ def write_spine_curve_csv(
     lon_deg: np.ndarray,
     density_kg_m3: np.ndarray | None = None,
     temperature_k: np.ndarray | None = None,
+    pressure_pa: np.ndarray | None = None,
 ) -> None:
     cumulative_surface_km, cumulative_flight_km = cumulative_sampled_distances_km(lat_deg, lon_deg)
 
@@ -943,6 +1145,8 @@ def write_spine_curve_csv(
             header.append("density_kg_m3")
         if temperature_k is not None:
             header.append("temperature_k")
+        if pressure_pa is not None:
+            header.append("pressure_pa")
         writer.writerow(header)
 
         for idx in range(len(lat_deg)):
@@ -957,6 +1161,8 @@ def write_spine_curve_csv(
                 row.append(f"{density_kg_m3[idx]:.8f}")
             if temperature_k is not None:
                 row.append(f"{temperature_k[idx]:.3f}")
+            if pressure_pa is not None:
+                row.append(f"{pressure_pa[idx]:.3f}")
             writer.writerow(row)
 
 
@@ -976,14 +1182,27 @@ def main() -> None:
     centerline_flight_km = flight_path_distance_km(centerline_surface_km)
     optimized_piecewise_flight_km = flight_path_distance_km(optimized_piecewise_surface_km)
     spline_flight_km = flight_path_distance_km(spline_surface_km)
+    cruise_temperature_k = isa_temperature_k(CRUISE_ALTITUDE_FT * FT_TO_M)
+    cruise_speed_m_s = mach_velocity_m_s(CRUISE_MACH, cruise_temperature_k)
+    flight_time_hr = time_of_flight_hr(spline_flight_km, cruise_speed_m_s)
     _, cumulative_flight_km = cumulative_sampled_distances_km(spine_lat, spine_lon)
+    interest_markers = route_interest_markers(
+        optimized_anchor_points,
+        FLYOVER_REGIONS,
+        spine_lat,
+        spine_lon,
+        cumulative_flight_km,
+    )
     density_kg_m3, temperature_k = evaluate_density_profile_nrlmsis(spine_lat, spine_lon)
+    pressure_pa = static_pressure_pa(density_kg_m3, temperature_k)
 
     map_path = output_plot_dir / "route_map.png"
     globe_path = output_plot_dir / "route_globe.png"
     ortho_path = output_plot_dir / "route_orthographic.png"
     interactive_globe_path = output_plot_dir / "route_globe_interactive.html"
     density_plot_path = output_plot_dir / "density_vs_distance.png"
+    temperature_plot_path = output_plot_dir / "temperature_vs_distance.png"
+    pressure_plot_path = output_plot_dir / "pressure_vs_distance.png"
     anchors_csv_path = output_data_dir / "optimized_anchor_points.csv"
     spine_csv_path = output_data_dir / "spine_curve.csv"
 
@@ -991,16 +1210,41 @@ def main() -> None:
     plot_route_globe(optimized_anchor_points, spine_lat, spine_lon, save_path=globe_path)
     plot_route_orthographic_map(optimized_anchor_points, spine_lat, spine_lon, FLYOVER_REGIONS, save_path=ortho_path)
     plot_route_plotly_globe(optimized_anchor_points, interactive_lat, interactive_lon, save_path=interactive_globe_path)
-    plot_density_vs_distance(cumulative_flight_km, density_kg_m3, save_path=density_plot_path)
+    plot_density_vs_distance(
+        cumulative_flight_km,
+        density_kg_m3,
+        interest_markers=interest_markers,
+        save_path=density_plot_path,
+    )
+    plot_temperature_vs_distance(
+        cumulative_flight_km,
+        temperature_k,
+        interest_markers=interest_markers,
+        save_path=temperature_plot_path,
+    )
+    plot_pressure_vs_distance(
+        cumulative_flight_km,
+        pressure_pa,
+        interest_markers=interest_markers,
+        save_path=pressure_plot_path,
+    )
     write_anchor_points_csv(anchors_csv_path, optimized_anchor_points, FLYOVER_REGIONS)
-    write_spine_curve_csv(spine_csv_path, spine_lat, spine_lon, density_kg_m3=density_kg_m3, temperature_k=temperature_k)
+    write_spine_curve_csv(
+        spine_csv_path,
+        spine_lat,
+        spine_lon,
+        density_kg_m3=density_kg_m3,
+        temperature_k=temperature_k,
+        pressure_pa=pressure_pa,
+    )
 
     textured_globe = "yes" if any(path.exists() for path in EARTH_TEXTURE_CANDIDATES) else "no"
     print("Route assumption:")
     print("  Intermediate flyover regions are traversed in the order listed in the assignment narrative.")
     print("  Each flyover region is modeled as a circular area centered on the coordinates below.")
     print(f"  Flight distance is evaluated at a constant altitude of {CRUISE_ALTITUDE_FT:,.0f} ft.")
-    print("  NRLMSIS density is computed as a climatological mean of four seasonal reference dates.")
+    print(f"  Time of flight assumes Mach {CRUISE_MACH:.1f} at ISA temperature for the cruise altitude.")
+    print("  NRLMSIS atmospheric density and temperature are computed as climatological means of four seasonal reference dates.")
     print(f"  NRLMSIS settings: version = {NRLMSIS_VERSION:.1f}, F10.7 = {NRLMSIS_F107:.1f}, F10.7a = {NRLMSIS_F107A:.1f}, Ap = {NRLMSIS_AP_VECTOR[0]:.1f}")
     print("\nFlyover region model:")
     for region in FLYOVER_REGIONS:
@@ -1019,15 +1263,24 @@ def main() -> None:
     print(f"Optimized piecewise route length at 70,000 ft = {optimized_piecewise_flight_km:,.0f} km")
     print(f"Smooth spine length on surface (sampled) = {spline_surface_km:,.0f} km")
     print(f"Total distance traveled along smooth spine at 70,000 ft = {spline_flight_km:,.0f} km")
-    print(f"Mean NRLMSIS density along route at 70,000 ft = {density_kg_m3.mean():.5f} kg/m^3")
-    print(f"Density range along route at 70,000 ft = [{density_kg_m3.min():.5f}, {density_kg_m3.max():.5f}] kg/m^3")
+    print(f"Cruise speed at Mach {CRUISE_MACH:.1f} = {cruise_speed_m_s:,.1f} m/s")
+    print(f"Time of flight along smooth spine = {flight_time_hr:.2f} hr")
+    print(f"Mean NRLMSIS atmospheric density along route at 70,000 ft = {density_kg_m3.mean():.5f} kg/m^3")
+    print(f"Atmospheric density range along route at 70,000 ft = [{density_kg_m3.min():.5f}, {density_kg_m3.max():.5f}] kg/m^3")
+    print(f"Mean NRLMSIS atmospheric temperature along route at 70,000 ft = {temperature_k.mean():.2f} K")
+    print(f"Atmospheric temperature range along route at 70,000 ft = [{temperature_k.min():.2f}, {temperature_k.max():.2f}] K")
+    print(f"Mean atmospheric static pressure along route at 70,000 ft = {pressure_pa.mean():.1f} Pa")
+    print(f"Atmospheric static pressure range along route at 70,000 ft = [{pressure_pa.min():.1f}, {pressure_pa.max():.1f}] Pa")
     print(f"\nTOTAL AIRCRAFT DISTANCE COVERED = {spline_flight_km:,.0f} km")
+    print(f"TOTAL TIME OF FLIGHT = {flight_time_hr:.2f} hr")
     print(f"Textured Earth globe available = {textured_globe}")
     print(f"Saved map view            to {map_path}")
     print(f"Saved globe view          to {globe_path}")
     print(f"Saved orthographic globe  to {ortho_path}")
     print(f"Saved interactive globe   to {interactive_globe_path}")
     print(f"Saved density plot        to {density_plot_path}")
+    print(f"Saved temperature plot    to {temperature_plot_path}")
+    print(f"Saved pressure plot       to {pressure_plot_path}")
     print(f"Saved optimized anchors   to {anchors_csv_path}")
     print(f"Saved spine curve         to {spine_csv_path}")
 
