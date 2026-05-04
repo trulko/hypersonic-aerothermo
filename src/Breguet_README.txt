@@ -99,6 +99,18 @@ What it prints:
 - Optimizer objective and constraints
 - Best feasible optimizer case, when RUN_OPTIMIZER = True
 
+What it saves when RUN_OPTIMIZER = True:
+- runs/breguet-optimizer/viable-options.png
+  fuel-by-fuel design-space plot with viable cases and non-viable cases marked
+- runs/breguet-optimizer/viable-options.csv
+  raw list of all feasible discrete optimizer cases
+- runs/breguet-optimizer/optimization-summary.tex
+  LaTeX-ready subsection with a figure include, viable-options table, and
+  summary paragraphs
+- runs/breguet-optimizer/overleaf/
+  Overleaf-ready bundle containing main.tex, optimization-summary.tex,
+  viable-options.png, and a short upload README
+
 
 Assumptions in the Breguet Method
 ---------------------------------
