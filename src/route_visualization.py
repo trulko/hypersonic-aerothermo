@@ -167,13 +167,14 @@ def isa_temperature_k(altitude_m: float) -> float:
     raise ValueError("Altitude is outside the ISA layer range handled by this script.")
 
 
-def mach_velocity_m_s(mach: float, temperature_k: float) -> float:
+def mach_velocity_m_s(mach: float, temperature_k: np.ndarray | float) -> np.ndarray | float:
     if mach <= 0.0:
         raise ValueError("mach must be positive.")
-    if temperature_k <= 0.0:
+    temperature = np.asarray(temperature_k)
+    if np.any(temperature <= 0.0):
         raise ValueError("temperature_k must be positive.")
 
-    return mach * np.sqrt(GAMMA_AIR * R_AIR_J_PER_KG_K * temperature_k)
+    return mach * np.sqrt(GAMMA_AIR * R_AIR_J_PER_KG_K * temperature)
 
 
 def time_of_flight_hr(distance_km: float, speed_m_s: float) -> float:
@@ -682,6 +683,7 @@ def plot_atmosphere_profiles_vs_distance(
     density_kg_m3: np.ndarray,
     temperature_k: np.ndarray,
     pressure_pa: np.ndarray,
+    speed_m_s: np.ndarray,
     interest_markers: list[tuple[str, float, float, float]] | None = None,
     save_path: str | None = None,
 ) -> tuple[plt.Figure, plt.Axes]:
@@ -691,15 +693,18 @@ def plot_atmosphere_profiles_vs_distance(
 
     ax2 = ax.twinx()
     ax3 = ax.twinx()
+    ax4 = ax.twinx()
     ax3.spines["right"].set_position(("axes", 1.12))
     ax3.spines["right"].set_visible(True)
-    for twin_ax in (ax2, ax3):
+    ax4.spines["right"].set_position(("axes", 1.24))
+    ax4.spines["right"].set_visible(True)
+    for twin_ax in (ax2, ax3, ax4):
         twin_ax.patch.set_alpha(0.0)
 
     density_line, = ax.plot(
         distance_km,
         density_kg_m3,
-        color="#0f4c81",
+        color="#1b4faf",
         lw=2.2,
         label=r"Density [kg/m$^3$]",
     )
@@ -707,7 +712,7 @@ def plot_atmosphere_profiles_vs_distance(
     temperature_line, = ax2.plot(
         distance_km,
         temperature_k,
-        color="#9a3412",
+        color="#ff0000",
         lw=2.0,
         label="Temperature [K]",
     )
@@ -720,16 +725,26 @@ def plot_atmosphere_profiles_vs_distance(
         label="Pressure [Pa]",
     )
     # ax3.fill_between(distance_km, pressure_pa, color="#2f6f4e", alpha=0.1)
+    speed_line, = ax4.plot(
+        distance_km,
+        speed_m_s,
+        color="black",
+        lw=1.8,
+        ls="--",
+        label="Speed [m/s]",
+    )
 
     ax.set_xlabel("Distance Along Route [km] at 70,000 ft altitude")
-    ax.set_ylabel(r"Density [kg/m$^3$]", color="#0f4c81")
-    ax2.set_ylabel("Temperature [K]", color="#9a3412")
+    ax.set_ylabel(r"Density [kg/m$^3$]", color="#1b4faf")
+    ax2.set_ylabel("Temperature [K]", color="#ff0000")
     ax3.set_ylabel("Pressure [Pa]", color="#2f6f4e")
-    ax.set_title("NRLMSIS 2.0 Mean Atmospheric Profile Along the Optimized Route")
+    ax4.set_ylabel("Speed [m/s]", color="black")
+    # ax.set_title("NRLMSIS 2.0 Mean Atmospheric Profile Along the Optimized Route")
 
-    ax.tick_params(axis="y", colors="#0f4c81")
-    ax2.tick_params(axis="y", colors="#9a3412")
+    ax.tick_params(axis="y", colors="#1b4faf")
+    ax2.tick_params(axis="y", colors="#ff0000")
     ax3.tick_params(axis="y", colors="#2f6f4e")
+    ax4.tick_params(axis="y", colors="black")
     ax.grid(True, color="#d7dde3", linewidth=0.8)
 
     if interest_markers is not None:
@@ -756,16 +771,24 @@ def plot_atmosphere_profiles_vs_distance(
             )
 
     ax.legend(
-        [density_line, temperature_line, pressure_line],
-        [density_line.get_label(), temperature_line.get_label(), pressure_line.get_label()],
-        loc='best', bbox_to_anchor=(0.6, 0., 0.4, 0.5),
-        frameon=True, framealpha=0.0
+        [density_line, temperature_line, pressure_line, speed_line],
+        [
+            density_line.get_label(),
+            temperature_line.get_label(),
+            pressure_line.get_label(),
+            speed_line.get_label(),
+        ],
+        loc="best",
+        bbox_to_anchor=(0.6, 0.0, 0.4, 0.5),
+        frameon=True,
+        framealpha=0.0,
     )
 
     # Set axis limits with some padding
     ax.set_ylim(bottom=density_kg_m3.min() * 0.9)
     ax2.set_ylim(bottom=temperature_k.min() * 0.9)
     ax3.set_ylim(bottom=pressure_pa.min() * 0.9)
+    ax4.set_ylim(bottom=speed_m_s.min() * 0.95)
 
     if save_path is not None:
         fig.savefig(save_path, dpi=220, bbox_inches="tight")
@@ -1181,6 +1204,7 @@ def main() -> None:
     )
     density_kg_m3, temperature_k = evaluate_density_profile_nrlmsis(spine_lat, spine_lon)
     pressure_pa = static_pressure_pa(density_kg_m3, temperature_k)
+    speed_m_s = mach_velocity_m_s(CRUISE_MACH, temperature_k)
 
     map_path = output_plot_dir / "route_map.png"
     globe_path = output_plot_dir / "route_globe.png"
@@ -1199,6 +1223,7 @@ def main() -> None:
         density_kg_m3,
         temperature_k,
         pressure_pa,
+        speed_m_s,
         interest_markers=interest_markers,
         save_path=atmosphere_plot_path,
     )
