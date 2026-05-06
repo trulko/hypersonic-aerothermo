@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import numpy as np
 import plotly.graph_objects as go
 from scipy.interpolate import CubicSpline
@@ -746,6 +747,21 @@ def plot_atmosphere_profiles_vs_distance(
     ax3.tick_params(axis="y", colors="#2f6f4e")
     ax4.tick_params(axis="y", colors="black")
     ax.grid(True, color="#d7dde3", linewidth=0.8)
+
+    distance_m = distance_km * 1000.0
+    segment_m = np.diff(distance_m)
+    avg_speed_m_s = 0.5 * (speed_m_s[1:] + speed_m_s[:-1])
+    time_s = np.concatenate(([0.0], np.cumsum(segment_m / avg_speed_m_s)))
+    time_hr = time_s / 3600.0
+    time_axis = ax.secondary_xaxis(
+        "top",
+        functions=(
+            lambda x: np.interp(x, distance_km, time_hr),
+            lambda t: np.interp(t, time_hr, distance_km),
+        ),
+    )
+    time_axis.set_xlabel("Elapsed Time [hr]")
+    time_axis.xaxis.set_major_locator(MaxNLocator(nbins=6, prune="upper"))
 
     if interest_markers is not None:
         for idx, (label, marker_distance_km, start_km, end_km) in enumerate(interest_markers):
